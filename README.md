@@ -77,6 +77,15 @@ There's also a **Manual Mode** for power users to read arbitrary registers with 
 | Pixii | PowerShaper 2 | 40052 |
 | Eastron | SDM630 (meter) | 64512 |
 | Fronius | Smart Meter TS 65A-3 | 40053 |
+| Ferroamp | EnergyHub | 2000 |
+| GoodWe | ET/EH/BH/BT Hybrid | 35003 |
+| Growatt | Hybrid | 23 |
+| SolaX | X1/X3 | 768 |
+| SofarSolar | HYD G3 | 1093 |
+| Victron | Energy (GX) | 800 |
+| FoxESS | H3 | 30000 |
+| Alpha ESS | SMILE | 0 |
+| E3DC | S10/E | 40000 |
 
 ## Common Ports Scanned
 
