@@ -1,0 +1,33 @@
+package devices
+
+import "github.com/srcfl/modbus-debug/internal/modbus"
+
+func FroniusRegisters() *modbus.RegisterSet {
+	return modbus.NewRegisterSet("fronius", []modbus.RegisterDef{
+		// Identity (SunSpec Common Model)
+		{Address: 40052, Name: "Serial Number", SemanticName: "serial_number", Description: "Inverter serial number", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 16, Endianness: modbus.Big, UseHolding: true},
+
+		// PV / AC Output (SunSpec Inverter Model)
+		{Address: 40107, Name: "PV Power", SemanticName: "pv_power", Description: "AC power output", Unit: "W", Category: "pv", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 40108, Name: "PV Power SF", Description: "AC power scale factor", Unit: "", Category: "pv", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+
+		// Grid
+		{Address: 40109, Name: "Grid Frequency", SemanticName: "grid_frequency", Description: "AC frequency", Unit: "Hz", Category: "grid", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 40110, Name: "Grid Frequency SF", Description: "Frequency scale factor", Unit: "", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+
+		// Battery (SunSpec Storage Model)
+		{Address: 40321, Name: "Battery SoC", SemanticName: "battery_soc", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 40322, Name: "Battery Status", SemanticName: "battery_flags", Description: "Battery status flags", Unit: "", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 40323, Name: "Battery Power", SemanticName: "battery_power", Description: "Battery charge/discharge power", Unit: "W", Category: "battery", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+
+		// Meter
+		{Address: 40100, Name: "Meter Power", SemanticName: "meter_power", Description: "Total active power", Unit: "W", Category: "meter", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+		{Address: 40101, Name: "Meter Power SF", Description: "Active power scale factor", Unit: "", Category: "meter", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+
+		// Energy Totals
+		{Address: 40113, Name: "Total PV Generation", SemanticName: "total_pv_gen", Description: "AC lifetime energy production", Unit: "Wh", Category: "pv", DataType: modbus.U32, Scale: 1.0, Words: 2, Endianness: modbus.Big, UseHolding: true},
+
+		// Nominal
+		{Address: 40089, Name: "Nominal Power", SemanticName: "nominal_power", Description: "Rated AC power", Unit: "W", Category: "pv", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
+	}, nil)
+}

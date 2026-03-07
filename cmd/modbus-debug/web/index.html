@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Modbus TCP Debug Tool</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="alpine.min.js"></script>
+</head>
+<body>
+<div class="container" x-data="app()">
+  <header>
+    <h1>Modbus TCP Debug</h1>
+    <span class="version">Sourceful Energy</span>
+  </header>
+
+  <!-- Mode Tabs -->
+  <div class="tabs">
+    <button class="tab" :class="{ active: mode === 'wizard' }" @click="mode = 'wizard'">Guided Wizard</button>
+    <button class="tab" :class="{ active: mode === 'manual' }" @click="mode = 'manual'">Manual Mode</button>
+  </div>
+
+  <!-- ============ WIZARD MODE ============ -->
+  <template x-if="mode === 'wizard'">
+    <div>
+      <!-- Progress Bar -->
+      <div class="progress-bar">
+        <template x-for="i in 5">
+          <div class="progress-step" :class="{ active: step === i, done: step > i }"></div>
+        </template>
+      </div>
+
+      <!-- Step 1: Network Scan -->
+      <template x-if="step === 1">
+        <div class="card">
+          <h2><span class="step">1</span> Find Your Inverter</h2>
+          <p class="text-muted text-sm mb-2">Scan your local network for devices with Modbus TCP open, or enter the IP manually.</p>
+
+          <div class="input-group mt-4">
+            <label>Subnet</label>
+            <select x-model="selectedSubnet">
+              <template x-for="iface in interfaces">
+                <template x-for="subnet in iface.subnets">
+                  <option :value="subnet" x-text="iface.name + ' - ' + subnet"></option>
+                </template>
+              </template>
+            </select>
+          </div>
+
+          <!-- Port selection -->
+          <div class="mt-2 mb-2">
+            <p class="text-sm text-muted mb-2">Ports to scan:</p>
+            <div class="port-checks">
+              <template x-for="p in scanPorts" :key="p.port">
+                <label class="port-check" :class="{ active: p.enabled }">
+                  <input type="checkbox" x-model="p.enabled" style="display:none">
+                  <span class="port-num" x-text="p.port"></span>
+                  <span class="port-desc" x-text="p.description"></span>
+                </label>
+              </template>
+            </div>
+            <div class="flex gap-2 items-center mt-2">
+              <input type="text" x-model="customPortInput" placeholder="Custom port(s): 5020, 8000-8010" style="flex:1; max-width: 280px;" @keydown.enter="addCustomPorts()">
+              <button class="btn btn-secondary btn-sm" @click="addCustomPorts()" :disabled="!customPortInput">Add</button>
+            </div>
+          </div>
+
+          <button class="btn btn-primary mt-2" @click="scanNetwork()" :disabled="scanning || !selectedSubnet">
+            <template x-if="scanning"><span class="spinner"></span></template>
+            Scan Network
+          </button>
+
+          <!-- Scan progress -->
+          <div class="scan-log mt-4" x-show="scanLog.length > 0">
+            <template x-for="entry in scanLog" :key="entry.port">
+              <div class="scan-log-entry" :class="{ done: entry.status === 'done' }">
+                <span class="text-muted">
+                  Port <strong x-text="entry.port"></strong>
+                  <span x-show="entry.desc" x-text="'(' + entry.desc + ')'"></span>
+                </span>
+                <span x-show="entry.status === 'scanning'" class="flex items-center gap-2"><span class="spinner"></span> scanning...</span>
+                <span x-show="entry.status === 'done' && entry.found > 0" class="badge badge-ok" x-text="entry.found + ' found'"></span>
+                <span x-show="entry.status === 'done' && entry.found === 0" class="badge badge-info">none</span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Scan results -->
+          <template x-if="scanResults.length > 0">
+            <div class="host-list">
+              <template x-for="host in scanResults">
+                <div class="host-item" :class="{ selected: target.host === host.ip && target.port === host.port }" @click="selectHost(host)">
+                  <span x-text="host.ip + ':' + host.port"></span>
+                  <span class="badge badge-ok" x-text="host.duration"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <template x-if="scanDone && scanResults.length === 0">
+            <p class="text-muted text-sm mt-4">No devices found on any scanned port. Try entering the IP manually below.</p>
+          </template>
+
+          <div class="mt-4" style="border-top: 1px solid var(--border); padding-top: 16px;">
+            <p class="text-sm text-muted mb-2">Or enter manually:</p>
+            <div class="input-group">
+              <label>IP Address</label>
+              <input type="text" x-model="target.host" placeholder="192.168.1.50">
+            </div>
+            <div class="input-group">
+              <label>Port</label>
+              <input type="number" x-model.number="target.port" placeholder="502" style="max-width: 100px;">
+            </div>
+          </div>
+
+          <div class="mt-4 flex justify-between">
+            <div></div>
+            <button class="btn btn-primary" @click="step = 2; testTCP()" :disabled="!target.host">
+              Next &rarr;
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Step 2: TCP Test -->
+      <template x-if="step === 2">
+        <div class="card">
+          <h2>
+            <span class="step" :class="{ done: tcpResult && tcpResult.success, fail: tcpResult && !tcpResult.success }">2</span>
+            TCP Connectivity
+          </h2>
+          <p class="text-sm text-muted mb-2">Testing TCP connection to <strong x-text="target.host + ':' + target.port"></strong></p>
+
+          <template x-if="tcpLoading">
+            <div class="flex items-center gap-2 mt-4"><span class="spinner"></span> Connecting...</div>
+          </template>
+
+          <template x-if="tcpResult">
+            <div class="mt-4">
+              <template x-if="tcpResult.success">
+                <div>
+                  <span class="badge badge-ok">CONNECTED</span>
+                  <span class="text-sm text-muted" x-text="'Response time: ' + tcpResult.duration"></span>
+                </div>
+              </template>
+              <template x-if="!tcpResult.success">
+                <div>
+                  <span class="badge badge-fail">FAILED</span>
+                  <p class="error-msg" x-text="tcpResult.error"></p>
+                  <p class="text-sm text-muted mt-2">Check that Modbus TCP is enabled on your inverter and port 502 is accessible. If another device (like a Zap) is connected, disconnect it first &mdash; some inverters only allow one TCP connection.</p>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div class="mt-4 flex justify-between">
+            <button class="btn btn-secondary" @click="step = 1">&larr; Back</button>
+            <button class="btn btn-primary" @click="step = 3; detectInverter()" :disabled="!tcpResult || !tcpResult.success">
+              Next &rarr;
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Step 3: Auto-Detect -->
+      <template x-if="step === 3">
+        <div class="card">
+          <h2>
+            <span class="step" :class="{ done: detection && detection.detected, fail: detection && !detection.detected }">3</span>
+            Detect Inverter
+          </h2>
+          <p class="text-sm text-muted mb-2">Trying to identify your inverter by reading serial number registers...</p>
+
+          <!-- Detection progress log -->
+          <div x-show="detectLog.length > 0" class="mt-4">
+            <div x-show="detectSlaveID !== null" class="text-sm text-muted mb-2">
+              Trying slave ID <strong x-text="detectSlaveID"></strong>
+            </div>
+            <div class="scan-log">
+              <template x-for="entry in detectLog" :key="entry.profile">
+                <div class="scan-log-entry" :class="{ done: entry.status !== 'trying' }">
+                  <span>
+                    <span x-text="entry.displayName"></span>
+                    <span class="text-muted text-sm" x-text="'(reg ' + entry.serialAddr + ')'"></span>
+                  </span>
+                  <span x-show="entry.status === 'trying'" class="flex items-center gap-2"><span class="spinner"></span> reading...</span>
+                  <span x-show="entry.status === 'found'" class="badge badge-ok" x-text="'MATCH' + (entry.serial ? ' — ' + entry.serial : '')"></span>
+                  <span x-show="entry.status === 'no_match'" class="flex items-center gap-2">
+                    <span class="badge badge-info">no match</span>
+                    <span class="text-muted text-sm" x-text="entry.durationMs != null ? entry.durationMs + 'ms' : ''"></span>
+                  </span>
+                  <span x-show="entry.status === 'error'" class="badge badge-fail">error</span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Detection result -->
+          <template x-if="detection">
+            <div class="mt-4">
+              <template x-if="detection.detected">
+                <div>
+                  <span class="badge badge-ok" x-text="detection.display_name"></span>
+                  <div class="mt-2 text-sm">
+                    <span class="text-muted">Serial:</span> <span x-text="detection.serial"></span><br>
+                    <span class="text-muted">Slave ID:</span> <span x-text="detection.slave_id"></span><br>
+                    <span class="text-muted">Profile:</span> <span x-text="detection.profile_name"></span>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!detection.detected">
+                <div>
+                  <span class="badge badge-warn">NOT DETECTED</span>
+                  <p class="text-sm text-muted mt-2">Could not identify your inverter across any known profile.</p>
+                  <p class="text-sm text-muted mt-2">Select your inverter manually:</p>
+                  <div class="input-group mt-2">
+                    <label>Profile</label>
+                    <select x-model="selectedProfile">
+                      <template x-for="p in profiles">
+                        <option :value="p.name" x-text="p.display_name"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="input-group">
+                    <label>Slave ID</label>
+                    <input type="number" x-model.number="target.slaveID" placeholder="1" style="max-width: 80px;">
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div class="mt-4 flex justify-between">
+            <button class="btn btn-secondary" @click="step = 2">&larr; Back</button>
+            <div class="flex gap-2">
+              <template x-if="detection && !detection.detected">
+                <button class="btn btn-secondary" @click="step = 5; generateReport()">Skip to Report</button>
+              </template>
+              <button class="btn btn-primary" @click="step = 4; readRegisters()" :disabled="detectLoading || (!detection?.detected && !selectedProfile)">
+                Next &rarr;
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Step 4: Read Registers -->
+      <template x-if="step === 4">
+        <div class="card">
+          <h2>
+            <span class="step" :class="{ done: readResult, fail: readError }">4</span>
+            Read Registers
+          </h2>
+
+          <template x-if="readLoading">
+            <div class="flex items-center gap-2"><span class="spinner"></span> Reading registers...</div>
+          </template>
+
+          <template x-if="readError">
+            <p class="error-msg" x-text="readError"></p>
+          </template>
+
+          <template x-if="readResult">
+            <div>
+              <div class="flex justify-between items-center">
+                <div>
+                  <span class="badge badge-ok" x-text="readResult.success + '/' + readResult.total + ' OK'"></span>
+                  <template x-if="readResult.failed > 0">
+                    <span class="badge badge-fail" x-text="readResult.failed + ' failed'"></span>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Category filter -->
+              <div class="filter-tabs">
+                <button class="filter-tab" :class="{ active: regFilter === 'all' }" @click="regFilter = 'all'">All</button>
+                <button class="filter-tab" :class="{ active: regFilter === 'pv' }" @click="regFilter = 'pv'">PV</button>
+                <button class="filter-tab" :class="{ active: regFilter === 'battery' }" @click="regFilter = 'battery'">Battery</button>
+                <button class="filter-tab" :class="{ active: regFilter === 'meter' }" @click="regFilter = 'meter'">Meter</button>
+                <button class="filter-tab" :class="{ active: regFilter === 'grid' }" @click="regFilter = 'grid'">Grid</button>
+                <button class="filter-tab" :class="{ active: regFilter === 'control' }" @click="regFilter = 'control'">Control</button>
+              </div>
+
+              <table class="reg-table">
+                <thead>
+                  <tr>
+                    <th>Addr</th>
+                    <th>Name</th>
+                    <th>Value</th>
+                    <th>Cat</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="reg in filteredRegisters()" :key="reg.address">
+                    <tr>
+                      <td class="text-muted" x-text="reg.address"></td>
+                      <td x-text="reg.name"></td>
+                      <td x-text="reg.value_str || (reg.ok ? reg.value : '-')"></td>
+                      <td><span class="cat" :class="'cat-' + reg.category" x-text="reg.category"></span></td>
+                      <td>
+                        <template x-if="reg.ok"><span class="badge badge-ok">OK</span></template>
+                        <template x-if="!reg.ok"><span class="badge badge-fail" :title="reg.error">FAIL</span></template>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+
+          <div class="mt-4 flex justify-between">
+            <button class="btn btn-secondary" @click="step = 3">&larr; Back</button>
+            <button class="btn btn-primary" @click="step = 5; generateReport()" :disabled="!readResult">
+              Next &rarr;
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Step 5: Report -->
+      <template x-if="step === 5">
+        <div class="card">
+          <h2><span class="step done">5</span> Diagnostic Report</h2>
+          <p class="text-sm text-muted mb-2">Copy this report and paste it in Discord or support.</p>
+
+          <template x-if="reportLoading">
+            <div class="flex items-center gap-2"><span class="spinner"></span> Generating report...</div>
+          </template>
+
+          <template x-if="report">
+            <div>
+              <div class="flex justify-between items-center">
+                <button class="btn btn-primary btn-sm" @click="copyReport()">Copy to Clipboard</button>
+              </div>
+              <div class="report-box" x-text="report"></div>
+            </div>
+          </template>
+
+          <div class="mt-4 flex justify-between">
+            <button class="btn btn-secondary" @click="step = 4">&larr; Back</button>
+            <button class="btn btn-secondary" @click="resetWizard()">Start Over</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- ============ MANUAL MODE ============ -->
+  <template x-if="mode === 'manual'">
+    <div>
+      <div class="card">
+        <h2>Manual Register Read</h2>
+        <p class="text-sm text-muted mb-2">Read arbitrary Modbus registers. No profile needed.</p>
+
+        <div class="input-group">
+          <label>IP Address</label>
+          <input type="text" x-model="manual.host" placeholder="192.168.1.50">
+        </div>
+        <div class="input-group">
+          <label>Port</label>
+          <input type="number" x-model.number="manual.port" placeholder="502" style="max-width: 100px;">
+        </div>
+        <div class="input-group">
+          <label>Slave ID</label>
+          <input type="number" x-model.number="manual.slaveID" placeholder="1" style="max-width: 80px;">
+        </div>
+        <div class="input-group">
+          <label>Address</label>
+          <input type="number" x-model.number="manual.address" placeholder="4989">
+        </div>
+        <div class="input-group">
+          <label>Count</label>
+          <input type="number" x-model.number="manual.count" placeholder="1" style="max-width: 80px;">
+        </div>
+        <div class="input-group">
+          <label>Register</label>
+          <select x-model="manual.holding">
+            <option :value="false">Input (FC 0x04)</option>
+            <option :value="true">Holding (FC 0x03)</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label>Decode as</label>
+          <select x-model="manual.dataType">
+            <option value="U16">U16</option>
+            <option value="I16">I16</option>
+            <option value="U32">U32</option>
+            <option value="I32">I32</option>
+            <option value="F32">F32</option>
+            <option value="STR">STR</option>
+          </select>
+        </div>
+
+        <button class="btn btn-primary mt-2" @click="rawRead()" :disabled="!manual.host || manualLoading">
+          <template x-if="manualLoading"><span class="spinner"></span></template>
+          Read
+        </button>
+      </div>
+
+      <template x-if="manualResult">
+        <div class="card">
+          <h2>Result</h2>
+          <template x-if="manualResult.error">
+            <p class="error-msg" x-text="manualResult.error"></p>
+          </template>
+          <template x-if="manualResult.ok">
+            <div>
+              <table class="reg-table">
+                <tr>
+                  <th>Address</th>
+                  <td x-text="manualResult.address"></td>
+                </tr>
+                <tr>
+                  <th>Raw (hex)</th>
+                  <td x-text="manualResult.raw_hex?.join(' ') || '-'"></td>
+                </tr>
+                <tr>
+                  <th>Raw (dec)</th>
+                  <td x-text="manualResult.raw?.join(' ') || '-'"></td>
+                </tr>
+                <tr>
+                  <th>Decoded</th>
+                  <td x-text="manualResult.value_str"></td>
+                </tr>
+              </table>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Manual read history -->
+      <template x-if="manualHistory.length > 0">
+        <div class="card">
+          <h2>History</h2>
+          <table class="reg-table">
+            <thead>
+              <tr>
+                <th>Addr</th>
+                <th>Type</th>
+                <th>Raw</th>
+                <th>Decoded</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(item, idx) in manualHistory" :key="idx">
+                <tr>
+                  <td x-text="item.address"></td>
+                  <td class="text-muted" x-text="item.dataType"></td>
+                  <td class="text-muted" x-text="item.raw_hex?.join(' ') || '-'"></td>
+                  <td x-text="item.value_str || '-'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
+  </template>
+
+  <!-- Toast -->
+  <template x-if="showToast">
+    <div class="copied-toast" x-text="toastMsg"></div>
+  </template>
+</div>
+
+<script>
+function app() {
+  return {
+    mode: 'wizard',
+    step: 1,
+
+    // Network
+    interfaces: [],
+    selectedSubnet: '',
+    scanning: false,
+    scanDone: false,
+    scanResults: [],
+    scanPorts: [],
+    scanLog: [],
+    customPortInput: '',
+
+    // Target
+    target: { host: '', port: 502, slaveID: 1 },
+
+    // TCP test
+    tcpResult: null,
+    tcpLoading: false,
+
+    // Detection
+    detection: null,
+    detectLoading: false,
+    detectLog: [],
+    detectSlaveID: null,
+    profiles: [],
+    selectedProfile: '',
+
+    // Read
+    readResult: null,
+    readLoading: false,
+    readError: null,
+    regFilter: 'all',
+
+    // Report
+    report: null,
+    reportLoading: false,
+
+    // Manual mode
+    manual: { host: '', port: 502, slaveID: 1, address: 0, count: 1, holding: false, dataType: 'U16' },
+    manualResult: null,
+    manualLoading: false,
+    manualHistory: [],
+
+    // Toast
+    showToast: false,
+    toastMsg: '',
+
+    async init() {
+      try {
+        const [ifRes, prRes, portRes] = await Promise.all([
+          fetch('/api/network/interfaces'),
+          fetch('/api/profiles'),
+          fetch('/api/network/ports')
+        ]);
+        this.interfaces = await ifRes.json();
+        this.profiles = await prRes.json();
+        const ports = await portRes.json();
+        this.scanPorts = ports.map(p => ({ ...p, enabled: true }));
+
+        if (this.interfaces.length > 0 && this.interfaces[0].subnets?.length > 0) {
+          this.selectedSubnet = this.interfaces[0].subnets[0];
+        }
+        if (this.profiles.length > 0) {
+          this.selectedProfile = this.profiles[0].name;
+        }
+      } catch (e) {
+        console.error('Init error:', e);
+      }
+    },
+
+    addCustomPorts() {
+      const input = this.customPortInput.trim();
+      if (!input) return;
+      const parts = input.split(/[,\s]+/);
+      for (const part of parts) {
+        const range = part.match(/^(\d+)-(\d+)$/);
+        if (range) {
+          const start = parseInt(range[1]), end = parseInt(range[2]);
+          for (let p = start; p <= end && p <= 65535 && (p - start) < 100; p++) {
+            if (!this.scanPorts.find(sp => sp.port === p)) {
+              this.scanPorts.push({ port: p, description: 'custom', enabled: true });
+            }
+          }
+        } else {
+          const p = parseInt(part);
+          if (p > 0 && p <= 65535 && !this.scanPorts.find(sp => sp.port === p)) {
+            this.scanPorts.push({ port: p, description: 'custom', enabled: true });
+          }
+        }
+      }
+      this.customPortInput = '';
+    },
+
+    async scanNetwork() {
+      this.scanning = true;
+      this.scanDone = false;
+      this.scanResults = [];
+      this.scanLog = [];
+
+      const ports = this.scanPorts.filter(p => p.enabled);
+      if (ports.length === 0) { this.scanning = false; return; }
+
+      for (let i = 0; i < ports.length; i++) {
+        const portInfo = ports[i];
+        // Add entry as "scanning"
+        this.scanLog = [...this.scanLog, { port: portInfo.port, desc: portInfo.description, status: 'scanning', found: 0 }];
+
+        let found = 0;
+        try {
+          const res = await fetch('/api/network/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subnet: this.selectedSubnet, port: portInfo.port, timeout_ms: 500 })
+          });
+          const hosts = await res.json();
+          if (Array.isArray(hosts)) {
+            this.scanResults = [...this.scanResults, ...hosts];
+            found = hosts.length;
+          }
+        } catch (e) {
+          console.error('Scan error port ' + portInfo.port + ':', e);
+        }
+
+        // Replace the entry with "done" status (new array triggers Alpine reactivity)
+        this.scanLog = this.scanLog.map(e =>
+          e.port === portInfo.port ? { ...e, status: 'done', found } : e
+        );
+      }
+
+      // Deduplicate by ip:port
+      const seen = new Set();
+      this.scanResults = this.scanResults.filter(h => {
+        const key = h.ip + ':' + h.port;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      this.scanning = false;
+      this.scanDone = true;
+    },
+
+    selectHost(host) {
+      this.target.host = host.ip;
+      this.target.port = host.port;
+    },
+
+    async testTCP() {
+      this.tcpLoading = true;
+      this.tcpResult = null;
+      try {
+        const res = await fetch('/api/diagnose/tcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ host: this.target.host, port: this.target.port })
+        });
+        this.tcpResult = await res.json();
+      } catch (e) {
+        this.tcpResult = { success: false, error: e.message };
+      }
+      this.tcpLoading = false;
+    },
+
+    async detectInverter() {
+      this.detectLoading = true;
+      this.detection = null;
+      this.detectLog = [];
+      this.detectSlaveID = null;
+
+      const slaveIDs = [1, 0, 247];
+      let found = false;
+
+      for (const slaveID of slaveIDs) {
+        if (found) break;
+        this.detectSlaveID = slaveID;
+
+        // Show all profiles as "trying"
+        this.detectLog = this.profiles.map(p => ({
+          profile: p.name,
+          displayName: p.display_name,
+          serialAddr: p.serial_address || '?',
+          status: 'trying'
+        }));
+
+        try {
+          const res = await fetch('/api/diagnose/detect-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              host: this.target.host,
+              port: this.target.port,
+              slave_id: slaveID
+            })
+          });
+          const results = await res.json();
+
+          if (Array.isArray(results)) {
+            this.detectLog = results.map(r => ({
+              profile: r.profile,
+              displayName: r.display_name,
+              serialAddr: (this.profiles.find(p => p.name === r.profile) || {}).serial_address || '?',
+              status: r.detected ? 'found' : 'no_match',
+              durationMs: r.duration_ms,
+              serial: r.serial || ''
+            }));
+
+            const match = results.find(r => r.detected);
+            if (match) {
+              this.detection = {
+                detected: true,
+                profile_name: match.profile,
+                display_name: match.display_name,
+                serial: match.serial,
+                slave_id: slaveID
+              };
+              this.selectedProfile = match.profile;
+              this.target.slaveID = slaveID;
+              found = true;
+            }
+          }
+        } catch (e) {
+          this.detectLog = this.detectLog.map(entry => ({
+            ...entry, status: 'error'
+          }));
+        }
+      }
+
+      if (!found) {
+        this.detection = { detected: false };
+      }
+      this.detectLoading = false;
+    },
+
+    async readRegisters() {
+      this.readLoading = true;
+      this.readResult = null;
+      this.readError = null;
+      const profile = this.detection?.detected ? this.detection.profile_name : this.selectedProfile;
+      const slaveID = this.detection?.detected ? this.detection.slave_id : this.target.slaveID;
+      try {
+        const res = await fetch('/api/diagnose/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: this.target.host,
+            port: this.target.port,
+            profile: profile,
+            slave_id: slaveID
+          })
+        });
+        const data = await res.json();
+        if (data.error) {
+          this.readError = data.error;
+        } else {
+          this.readResult = data;
+        }
+      } catch (e) {
+        this.readError = e.message;
+      }
+      this.readLoading = false;
+    },
+
+    filteredRegisters() {
+      if (!this.readResult) return [];
+      if (this.regFilter === 'all') return this.readResult.registers;
+      return this.readResult.registers.filter(r => r.category === this.regFilter);
+    },
+
+    async generateReport() {
+      this.reportLoading = true;
+      this.report = null;
+      try {
+        // Update report data on server
+        await fetch('/api/diagnose/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: this.target.host,
+            port: this.target.port,
+            tcp: this.tcpResult,
+            detection: this.detection,
+            read: this.readResult
+          })
+        });
+        // Get report
+        const res = await fetch('/api/diagnose/report');
+        const data = await res.json();
+        this.report = data.report;
+      } catch (e) {
+        this.report = 'Error generating report: ' + e.message;
+      }
+      this.reportLoading = false;
+    },
+
+    async copyReport() {
+      try {
+        await navigator.clipboard.writeText(this.report);
+        this.toast('Copied to clipboard!');
+      } catch (e) {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = this.report;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        this.toast('Copied to clipboard!');
+      }
+    },
+
+    async rawRead() {
+      this.manualLoading = true;
+      this.manualResult = null;
+      try {
+        const res = await fetch('/api/raw/read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: this.manual.host,
+            port: this.manual.port,
+            slave_id: this.manual.slaveID,
+            address: this.manual.address,
+            count: this.manual.count,
+            holding: this.manual.holding === true || this.manual.holding === 'true',
+            data_type: this.manual.dataType
+          })
+        });
+        this.manualResult = await res.json();
+        if (this.manualResult.ok) {
+          this.manualHistory.unshift({
+            ...this.manualResult,
+            dataType: this.manual.dataType
+          });
+          if (this.manualHistory.length > 20) this.manualHistory.pop();
+        }
+      } catch (e) {
+        this.manualResult = { ok: false, error: e.message };
+      }
+      this.manualLoading = false;
+    },
+
+    resetWizard() {
+      this.step = 1;
+      this.tcpResult = null;
+      this.detection = null;
+      this.readResult = null;
+      this.readError = null;
+      this.report = null;
+      this.scanResults = [];
+      this.scanDone = false;
+      this.scanLog = [];
+    },
+
+    toast(msg) {
+      this.toastMsg = msg;
+      this.showToast = true;
+      setTimeout(() => { this.showToast = false; }, 2000);
+    }
+  };
+}
+</script>
+</body>
+</html>
