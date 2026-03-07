@@ -60,7 +60,7 @@ func handleNetworkScan(w http.ResponseWriter, r *http.Request) {
 	if req.Port == 0 {
 		req.Port = 502
 	}
-	timeout := 500 * time.Millisecond
+	timeout := 200 * time.Millisecond
 	if req.Timeout > 0 {
 		timeout = time.Duration(req.Timeout) * time.Millisecond
 	}

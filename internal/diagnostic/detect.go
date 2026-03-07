@@ -3,6 +3,7 @@ package diagnostic
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/srcfl/modbus-debug/internal/modbus"
@@ -23,7 +24,53 @@ type DetectionResult struct {
 	DisplayName string `json:"display_name,omitempty"`
 	Serial      string `json:"serial,omitempty"`
 	SlaveID     byte   `json:"slave_id"`
+	Method      string `json:"method,omitempty"` // "fc43", "sunspec", or "serial"
+	Vendor      string `json:"vendor,omitempty"` // Raw vendor string from FC43/SunSpec
+	Model       string `json:"model,omitempty"`  // Raw model string from FC43/SunSpec
 	Error       string `json:"error,omitempty"`
+}
+
+// vendorProfileMap maps lowercase vendor/manufacturer substrings to profile names.
+var vendorProfileMap = []struct {
+	substring   string
+	profileName string
+}{
+	{"sungrow", "sungrow"},
+	{"huawei", "huawei"},
+	{"solis", "solis"},
+	{"fronius", "fronius"},
+	{"deye", "deye"},
+	{"solaredge", "solaredge"},
+	{"solar edge", "solaredge"},
+	{"sma", "sma"},
+	{"pixii", "pixii"},
+	{"eastron", "sdm630"},
+	{"sdm630", "sdm630"},
+	{"ferroamp", "ferroamp"},
+	{"goodwe", "goodwe"},
+	{"growatt", "growatt"},
+	{"solax", "solax"},
+	{"sofar", "sofar"},
+	{"victron", "victron"},
+	{"foxess", "foxess"},
+	{"fox ess", "foxess"},
+	{"alpha", "alpha-ess"},
+	{"e3dc", "e3dc"},
+	{"e3/dc", "e3dc"},
+	{"saj", "saj"},
+	{"abb", "fronius"}, // ABB/FIMER rebrands of Fronius
+	{"fimer", "fronius"},
+}
+
+// matchVendorToProfile tries to match a vendor/manufacturer string to a known profile.
+func matchVendorToProfile(vendor string) (profileName string, found bool) {
+	lower := strings.ToLower(vendor)
+	for _, entry := range vendorProfileMap {
+		if strings.Contains(lower, entry.substring) {
+			return entry.profileName, true
+		}
+	}
+	return "", false
 }
 
 // TestTCP tests TCP connectivity to the given host:port.
@@ -47,9 +94,12 @@ func TestTCP(host string, port int) TCPResult {
 	}
 }
 
-// DetectInverter tries to identify the inverter brand by reading the serial number register
-// for each known profile. Tries slave IDs 1, 0, 247 in order using a single TCP connection
-// to avoid overwhelming inverters that are sensitive to repeated connections.
+// DetectInverter tries to identify the inverter brand using a three-phase approach:
+//  1. FC 43/14 Read Device Identification (cleanest when supported)
+//  2. SunSpec discovery (probe for "SunS" header at well-known addresses)
+//  3. Serial number register probing (fallback, tries all profiles)
+//
+// Tries slave IDs 1, 0, 247 in order using a single TCP connection.
 func DetectInverter(host string, port int) DetectionResult {
 	client, err := modbus.NewTCPClientWithTimeout(host, port, 1, 500*time.Millisecond)
 	if err != nil {
@@ -64,9 +114,25 @@ func DetectInverter(host string, port int) DetectionResult {
 
 	for _, slaveID := range slaveIDs {
 		client.SetSlaveID(slaveID)
+
+		// Phase 1: Try FC 43/14 Read Device Identification
+		if result := tryFC43Detection(client, slaveID); result.Detected {
+			return result
+		}
+
+		// Phase 2: Try SunSpec discovery
+		if result := trySunSpecDetection(client, slaveID); result.Detected {
+			return result
+		}
+	}
+
+	// Phase 3: Fall back to serial number register probing
+	for _, slaveID := range slaveIDs {
+		client.SetSlaveID(slaveID)
 		for _, profile := range devices.AllProfiles() {
 			result := tryProfile(client, &profile, slaveID)
 			if result.Detected {
+				result.Method = "serial"
 				return result
 			}
 		}
@@ -75,6 +141,98 @@ func DetectInverter(host string, port int) DetectionResult {
 	return DetectionResult{
 		Detected: false,
 		Error:    "Could not detect inverter type. No profile matched on slave IDs 1, 0, or 247.",
+	}
+}
+
+// tryFC43Detection attempts FC 43/14 Read Device Identification.
+func tryFC43Detection(client *modbus.Client, slaveID byte) DetectionResult {
+	devID, err := client.ReadDeviceIdentification()
+	if err != nil {
+		return DetectionResult{Detected: false, SlaveID: slaveID}
+	}
+
+	// Try to match vendor to a known profile
+	vendorStr := devID.VendorName
+	if vendorStr == "" {
+		vendorStr = devID.ProductName
+	}
+	if vendorStr == "" {
+		return DetectionResult{Detected: false, SlaveID: slaveID}
+	}
+
+	profileName, found := matchVendorToProfile(vendorStr)
+	if !found {
+		// We got device info but can't map to a profile - still useful
+		return DetectionResult{
+			Detected: false,
+			SlaveID:  slaveID,
+			Method:   "fc43",
+			Vendor:   devID.VendorName,
+			Model:    devID.ProductCode,
+		}
+	}
+
+	// Find the display name
+	displayName := profileName
+	for _, p := range devices.AllProfiles() {
+		if p.Name == profileName {
+			displayName = p.DisplayName
+			break
+		}
+	}
+
+	return DetectionResult{
+		Detected:    true,
+		ProfileName: profileName,
+		DisplayName: displayName,
+		SlaveID:     slaveID,
+		Method:      "fc43",
+		Vendor:      devID.VendorName,
+		Model:       devID.ProductCode,
+		Serial:      "", // FC43 doesn't always provide serial
+	}
+}
+
+// trySunSpecDetection attempts SunSpec common model discovery.
+func trySunSpecDetection(client *modbus.Client, slaveID byte) DetectionResult {
+	info, err := client.DiscoverSunSpec()
+	if err != nil {
+		return DetectionResult{Detected: false, SlaveID: slaveID}
+	}
+
+	// Try to match manufacturer to a known profile
+	profileName, found := matchVendorToProfile(info.Manufacturer)
+	if !found {
+		// Try model string as fallback
+		profileName, found = matchVendorToProfile(info.Model)
+	}
+	if !found {
+		return DetectionResult{
+			Detected: false,
+			SlaveID:  slaveID,
+			Method:   "sunspec",
+			Vendor:   info.Manufacturer,
+			Model:    info.Model,
+		}
+	}
+
+	displayName := profileName
+	for _, p := range devices.AllProfiles() {
+		if p.Name == profileName {
+			displayName = p.DisplayName
+			break
+		}
+	}
+
+	return DetectionResult{
+		Detected:    true,
+		ProfileName: profileName,
+		DisplayName: displayName,
+		Serial:      info.Serial,
+		SlaveID:     slaveID,
+		Method:      "sunspec",
+		Vendor:      info.Manufacturer,
+		Model:       info.Model,
 	}
 }
 
@@ -160,9 +318,21 @@ func detectWithSlaveID(host string, port int, slaveID byte) DetectionResult {
 	}
 	defer client.Close()
 
+	// Phase 1: Try FC 43/14
+	if result := tryFC43Detection(client, slaveID); result.Detected {
+		return result
+	}
+
+	// Phase 2: Try SunSpec
+	if result := trySunSpecDetection(client, slaveID); result.Detected {
+		return result
+	}
+
+	// Phase 3: Serial number probing
 	for _, profile := range devices.AllProfiles() {
 		result := tryProfile(client, &profile, slaveID)
 		if result.Detected {
+			result.Method = "serial"
 			return result
 		}
 	}
