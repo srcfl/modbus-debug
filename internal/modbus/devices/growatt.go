@@ -18,6 +18,7 @@ func GrowattRegisters() *modbus.RegisterSet {
 		{Address: 1054, Name: "Total Discharge Energy", SemanticName: "total_discharge", Description: "Total battery discharge energy", Unit: "kWh", Category: "battery", DataType: modbus.U32, Scale: 0.1, Words: 2, Endianness: modbus.Big},
 
 		// Grid (input registers)
+		{Address: 37, Name: "Grid Frequency", SemanticName: "grid_frequency", Description: "Grid frequency", Unit: "Hz", Category: "grid", DataType: modbus.U16, Scale: 0.01, Words: 1, Endianness: modbus.Big},
 		{Address: 1021, Name: "Grid Import Power", SemanticName: "meter_power", Description: "AC power to user total", Unit: "W", Category: "meter", DataType: modbus.U32, Scale: 0.1, Words: 2, Endianness: modbus.Big},
 		{Address: 1029, Name: "Grid Export Power", SemanticName: "grid_export_power", Description: "AC power to grid total", Unit: "W", Category: "meter", DataType: modbus.U32, Scale: 0.1, Words: 2, Endianness: modbus.Big},
 		{Address: 1046, Name: "Grid Import Energy", SemanticName: "total_import", Description: "Total energy bought from grid", Unit: "kWh", Category: "meter", DataType: modbus.U32, Scale: 0.1, Words: 2, Endianness: modbus.Big},

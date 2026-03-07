@@ -24,10 +24,9 @@ type Host struct {
 // DefaultPorts are common Modbus TCP ports to scan.
 var DefaultPorts = []PortInfo{
 	{Port: 502, Description: "Modbus TCP (standard)"},
-	{Port: 1502, Description: "Modbus TCP (alt)"},
-	{Port: 8899, Description: "Deye/Solis Wi-Fi dongle"},
+	{Port: 1502, Description: "Kostal/Alt Modbus TCP"},
+	{Port: 8899, Description: "Deye/Solis/Sofar Wi-Fi dongle"},
 	{Port: 6607, Description: "Huawei SmartDongle"},
-	{Port: 502, Description: "SunSpec (Fronius/SolarEdge)"},
 }
 
 // PortInfo describes a port with its purpose.

@@ -17,7 +17,10 @@ func GoodWeRegisters() *modbus.RegisterSet {
 		{Address: 37007, Name: "Battery SoC", SemanticName: "battery_soc", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big, UseHolding: true},
 		{Address: 35209, Name: "Battery Discharge Energy", SemanticName: "total_discharge", Description: "Total battery discharge energy", Unit: "kWh", Category: "battery", DataType: modbus.U32, Scale: 0.1, Words: 2, Endianness: modbus.Big, UseHolding: true},
 
-		// Meter / Grid
+		// Grid
+		{Address: 35123, Name: "Grid Frequency", SemanticName: "grid_frequency", Description: "Grid frequency", Unit: "Hz", Category: "grid", DataType: modbus.U16, Scale: 0.01, Words: 1, Endianness: modbus.Big, UseHolding: true},
+
+		// Meter
 		{Address: 36025, Name: "Grid Power", SemanticName: "meter_power", Description: "Grid total active power", Unit: "W", Category: "meter", DataType: modbus.I32, Scale: -1.0, Words: 2, Endianness: modbus.Big, UseHolding: true},
 		{Address: 36017, Name: "Grid Buy Energy", SemanticName: "total_import", Description: "Total energy bought from grid", Unit: "kWh", Category: "meter", DataType: modbus.F32, Scale: 0.001, Words: 2, Endianness: modbus.Big, UseHolding: true},
 	}, nil)

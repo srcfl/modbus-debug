@@ -150,9 +150,10 @@ func handleDiagnoseDetectOne(w http.ResponseWriter, r *http.Request) {
 
 func handleDiagnoseDetectBatch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Host    string `json:"host"`
-		Port    int    `json:"port"`
-		SlaveID int    `json:"slave_id"`
+		Host      string `json:"host"`
+		Port      int    `json:"port"`
+		SlaveID   int    `json:"slave_id"`
+		TimeoutMs int    `json:"timeout_ms"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -166,7 +167,11 @@ func handleDiagnoseDetectBatch(w http.ResponseWriter, r *http.Request) {
 		req.Port = 502
 	}
 
-	results, err := diagnostic.DetectAllProfiles(req.Host, req.Port, byte(req.SlaveID))
+	timeout := 500
+	if req.TimeoutMs > 0 {
+		timeout = req.TimeoutMs
+	}
+	results, err := diagnostic.DetectAllProfiles(req.Host, req.Port, byte(req.SlaveID), time.Duration(timeout)*time.Millisecond)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

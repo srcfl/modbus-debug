@@ -82,8 +82,8 @@ type ProfileResult struct {
 
 // DetectAllProfiles tries all profiles with a single TCP connection for the given slave ID.
 // Returns results for every profile.
-func DetectAllProfiles(host string, port int, slaveID byte) ([]ProfileResult, error) {
-	client, err := modbus.NewTCPClientWithTimeout(host, port, slaveID, 500*time.Millisecond)
+func DetectAllProfiles(host string, port int, slaveID byte, timeout time.Duration) ([]ProfileResult, error) {
+	client, err := modbus.NewTCPClientWithTimeout(host, port, slaveID, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connection failed: %w", err)
 	}

@@ -29,6 +29,7 @@ var profiles = []Profile{
 	{Name: "foxess", DisplayName: "FoxESS H3", Registers: FoxESSRegisters},
 	{Name: "alpha-ess", DisplayName: "Alpha ESS SMILE", Registers: AlphaESSRegisters},
 	{Name: "e3dc", DisplayName: "E3DC", Registers: E3DCRegisters},
+	{Name: "saj", DisplayName: "SAJ H2", Registers: SAJRegisters},
 }
 
 // GetRegisterSet returns the RegisterSet for a given profile name.

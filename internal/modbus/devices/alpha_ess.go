@@ -4,8 +4,11 @@ import "github.com/srcfl/modbus-debug/internal/modbus"
 
 func AlphaESSRegisters() *modbus.RegisterSet {
 	return modbus.NewRegisterSet("alpha-ess", []modbus.RegisterDef{
-		// Serial Number (holding, 8 regs = 16 chars — standard Alpha ESS location)
-		{Address: 0, Name: "Serial Number", SemanticName: "serial_number", Description: "Device serial number", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 8, Endianness: modbus.Big, UseHolding: true},
+		// Serial Number (holding, 8 regs = 16 chars, slave ID 85/0x55)
+		{Address: 1610, Name: "Serial Number", SemanticName: "serial_number", Description: "Device serial number", Unit: "", Category: "pv", DataType: modbus.STR, Scale: 1.0, Words: 8, Endianness: modbus.Big, UseHolding: true},
+
+		// Grid frequency
+		{Address: 1052, Name: "Grid Frequency", SemanticName: "grid_frequency", Description: "Grid frequency", Unit: "Hz", Category: "grid", DataType: modbus.U16, Scale: 0.01, Words: 1, Endianness: modbus.Big, UseHolding: true},
 
 		// PV (holding registers)
 		{Address: 1055, Name: "PV1 Power", SemanticName: "pv1_power", Description: "PV string 1 power", Unit: "W", Category: "pv", DataType: modbus.U32, Scale: 1.0, Words: 2, Endianness: modbus.Big, UseHolding: true},

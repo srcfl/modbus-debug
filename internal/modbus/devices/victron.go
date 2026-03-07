@@ -20,8 +20,8 @@ func VictronRegisters() *modbus.RegisterSet {
 		{Address: 843, Name: "Battery SoC", SemanticName: "battery_soc", Description: "Battery state of charge", Unit: "%", Category: "battery", DataType: modbus.U16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
 
 		// Grid (input registers, unit ID 100)
-		{Address: 820, Name: "Grid Power L1", SemanticName: "grid_power_l1", Description: "Grid power L1", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
-		{Address: 821, Name: "Grid Power L2", SemanticName: "grid_power_l2", Description: "Grid power L2", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
-		{Address: 822, Name: "Grid Power L3", SemanticName: "grid_power_l3", Description: "Grid power L3", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
+		{Address: 817, Name: "Grid Power L1", SemanticName: "grid_power_l1", Description: "Grid power L1", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
+		{Address: 818, Name: "Grid Power L2", SemanticName: "grid_power_l2", Description: "Grid power L2", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
+		{Address: 819, Name: "Grid Power L3", SemanticName: "grid_power_l3", Description: "Grid power L3", Unit: "W", Category: "grid", DataType: modbus.I16, Scale: 1.0, Words: 1, Endianness: modbus.Big},
 	}, nil)
 }

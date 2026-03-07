@@ -640,6 +640,14 @@ function app() {
       const slaveIDs = [1, 0, 247];
       let found = false;
 
+      // Adaptive timeout: if TCP was slow (e.g. WiFi dongle), use longer timeout
+      let timeoutMs = 500;
+      if (this.tcpResult && this.tcpResult.duration) {
+        const tcpMs = parseInt(this.tcpResult.duration);
+        if (tcpMs > 200) timeoutMs = Math.min(tcpMs * 5, 5000);
+        else if (tcpMs > 50) timeoutMs = 1000;
+      }
+
       for (const slaveID of slaveIDs) {
         if (found) break;
         this.detectSlaveID = slaveID;
@@ -659,7 +667,8 @@ function app() {
             body: JSON.stringify({
               host: this.target.host,
               port: this.target.port,
-              slave_id: slaveID
+              slave_id: slaveID,
+              timeout_ms: timeoutMs
             })
           });
           const results = await res.json();
