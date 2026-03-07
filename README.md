@@ -2,7 +2,7 @@
 
 A free, open-source diagnostic tool for testing Modbus TCP connections to solar inverters and energy meters. Download a single binary, run it, and get a clear answer about whether your device's Modbus TCP is working — no installation required.
 
-Built by [Sourceful Energy](https://sourceful.energy). Uses the same Modbus library as our production Zap gateways.
+Built by [Sourceful Energy](https://sourceful.energy) — the makers of the [Zap](https://sourceful.energy), a ~$20 gateway for local energy coordination. This tool speaks the same Modbus TCP protocol as the Zap, making it the perfect companion for verifying your inverter setup before or during deployment.
 
 **This is a read-only tool** — it never writes to your inverter registers. Safe to use at any time.
 
