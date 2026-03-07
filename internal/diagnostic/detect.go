@@ -48,14 +48,27 @@ func TestTCP(host string, port int) TCPResult {
 }
 
 // DetectInverter tries to identify the inverter brand by reading the serial number register
-// for each known profile. Tries slave IDs 1, 0, 247 in order.
+// for each known profile. Tries slave IDs 1, 0, 247 in order using a single TCP connection
+// to avoid overwhelming inverters that are sensitive to repeated connections.
 func DetectInverter(host string, port int) DetectionResult {
+	client, err := modbus.NewTCPClientWithTimeout(host, port, 1, 500*time.Millisecond)
+	if err != nil {
+		return DetectionResult{
+			Detected: false,
+			Error:    fmt.Sprintf("Connection failed: %s", err.Error()),
+		}
+	}
+	defer client.Close()
+
 	slaveIDs := []byte{1, 0, 247}
 
 	for _, slaveID := range slaveIDs {
-		result := detectWithSlaveID(host, port, slaveID)
-		if result.Detected {
-			return result
+		client.SetSlaveID(slaveID)
+		for _, profile := range devices.AllProfiles() {
+			result := tryProfile(client, &profile, slaveID)
+			if result.Detected {
+				return result
+			}
 		}
 	}
 
