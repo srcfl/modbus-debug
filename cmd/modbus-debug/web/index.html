@@ -65,6 +65,16 @@
             </div>
           </div>
 
+          <div class="input-group mt-2">
+            <label>Scan timeout</label>
+            <select x-model.number="scanTimeoutMs" style="max-width: 200px;">
+              <option value="500">500ms (fast LAN only)</option>
+              <option value="2000">2000ms (default)</option>
+              <option value="5000">5000ms (Wi-Fi dongles)</option>
+              <option value="10000">10000ms (very slow devices)</option>
+            </select>
+          </div>
+
           <button class="btn btn-primary mt-2" @click="scanNetwork()" :disabled="scanning || !selectedSubnet">
             <template x-if="scanning"><span class="spinner"></span></template>
             Scan Network
@@ -479,6 +489,7 @@ function app() {
     scanPorts: [],
     scanLog: [],
     customPortInput: '',
+    scanTimeoutMs: 2000,
 
     // Target
     target: { host: '', port: 502, slaveID: 1 },
@@ -570,36 +581,40 @@ function app() {
       const ports = this.scanPorts.filter(p => p.enabled);
       if (ports.length === 0) { this.scanning = false; return; }
 
-      for (let i = 0; i < ports.length; i++) {
-        const portInfo = ports[i];
-        // Add entry as "scanning"
-        this.scanLog = [...this.scanLog, { port: portInfo.port, desc: portInfo.description, status: 'scanning', found: 0 }];
+      // Show all ports as "scanning" immediately
+      this.scanLog = ports.map(p => ({ port: p.port, desc: p.description, status: 'scanning', found: 0 }));
 
-        let found = 0;
+      // Fire all port scans in parallel
+      const promises = ports.map(async (portInfo) => {
         try {
           const res = await fetch('/api/network/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subnet: this.selectedSubnet, port: portInfo.port, timeout_ms: 500 })
+            body: JSON.stringify({ subnet: this.selectedSubnet, port: portInfo.port, timeout_ms: this.scanTimeoutMs })
           });
           const hosts = await res.json();
-          if (Array.isArray(hosts)) {
-            this.scanResults = [...this.scanResults, ...hosts];
-            found = hosts.length;
-          }
+          const found = Array.isArray(hosts) ? hosts : [];
+
+          // Update this port's log entry to done
+          this.scanLog = this.scanLog.map(e =>
+            e.port === portInfo.port ? { ...e, status: 'done', found: found.length } : e
+          );
+
+          return found;
         } catch (e) {
           console.error('Scan error port ' + portInfo.port + ':', e);
+          this.scanLog = this.scanLog.map(e =>
+            e.port === portInfo.port ? { ...e, status: 'done', found: 0 } : e
+          );
+          return [];
         }
+      });
 
-        // Replace the entry with "done" status (new array triggers Alpine reactivity)
-        this.scanLog = this.scanLog.map(e =>
-          e.port === portInfo.port ? { ...e, status: 'done', found } : e
-        );
-      }
+      const allResults = (await Promise.all(promises)).flat();
 
       // Deduplicate by ip:port
       const seen = new Set();
-      this.scanResults = this.scanResults.filter(h => {
+      this.scanResults = allResults.filter(h => {
         const key = h.ip + ':' + h.port;
         if (seen.has(key)) return false;
         seen.add(key);
@@ -638,7 +653,6 @@ function app() {
       this.detectSlaveID = null;
 
       const slaveIDs = [1, 0, 247];
-      let found = false;
 
       // Adaptive timeout: if TCP was slow (e.g. WiFi dongle), use longer timeout
       let timeoutMs = 500;
@@ -648,18 +662,18 @@ function app() {
         else if (tcpMs > 50) timeoutMs = 1000;
       }
 
-      for (const slaveID of slaveIDs) {
-        if (found) break;
-        this.detectSlaveID = slaveID;
+      // Show all profiles as "trying"
+      this.detectLog = this.profiles.map(p => ({
+        profile: p.name,
+        displayName: p.display_name,
+        serialAddr: p.serial_address || '?',
+        status: 'trying'
+      }));
 
-        // Show all profiles as "trying"
-        this.detectLog = this.profiles.map(p => ({
-          profile: p.name,
-          displayName: p.display_name,
-          serialAddr: p.serial_address || '?',
-          status: 'trying'
-        }));
+      this.detectSlaveID = 'all (1, 0, 247)';
 
+      // Fire all slave IDs in parallel
+      const promises = slaveIDs.map(async (slaveID) => {
         try {
           const res = await fetch('/api/diagnose/detect-batch', {
             method: 'POST',
@@ -672,39 +686,60 @@ function app() {
             })
           });
           const results = await res.json();
-
-          if (Array.isArray(results)) {
-            this.detectLog = results.map(r => ({
-              profile: r.profile,
-              displayName: r.display_name,
-              serialAddr: (this.profiles.find(p => p.name === r.profile) || {}).serial_address || '?',
-              status: r.detected ? 'found' : 'no_match',
-              durationMs: r.duration_ms,
-              serial: r.serial || ''
-            }));
-
-            const match = results.find(r => r.detected);
-            if (match) {
-              this.detection = {
-                detected: true,
-                profile_name: match.profile,
-                display_name: match.display_name,
-                serial: match.serial,
-                slave_id: slaveID
-              };
-              this.selectedProfile = match.profile;
-              this.target.slaveID = slaveID;
-              found = true;
-            }
-          }
+          if (!Array.isArray(results)) return null;
+          const match = results.find(r => r.detected);
+          return { slaveID, results, match: match || null };
         } catch (e) {
-          this.detectLog = this.detectLog.map(entry => ({
-            ...entry, status: 'error'
-          }));
+          return null;
+        }
+      });
+
+      const allResults = await Promise.all(promises);
+
+      // Find the first match (prefer slave ID order: 1, 0, 247)
+      let winner = null;
+      let bestResults = null;
+      for (const r of allResults) {
+        if (r && r.match && !winner) {
+          winner = r;
+        }
+        // Use results from slave ID 1 for the log display (or first non-null)
+        if (r && r.results && !bestResults) {
+          bestResults = r;
         }
       }
 
-      if (!found) {
+      if (winner) {
+        this.detectSlaveID = winner.slaveID;
+        this.detectLog = winner.results.map(r => ({
+          profile: r.profile,
+          displayName: r.display_name,
+          serialAddr: (this.profiles.find(p => p.name === r.profile) || {}).serial_address || '?',
+          status: r.detected ? 'found' : 'no_match',
+          durationMs: r.duration_ms,
+          serial: r.serial || ''
+        }));
+        this.detection = {
+          detected: true,
+          profile_name: winner.match.profile,
+          display_name: winner.match.display_name,
+          serial: winner.match.serial,
+          slave_id: winner.slaveID
+        };
+        this.selectedProfile = winner.match.profile;
+        this.target.slaveID = winner.slaveID;
+      } else {
+        // Show results from first slave ID attempt
+        if (bestResults) {
+          this.detectLog = bestResults.results.map(r => ({
+            profile: r.profile,
+            displayName: r.display_name,
+            serialAddr: (this.profiles.find(p => p.name === r.profile) || {}).serial_address || '?',
+            status: 'no_match',
+            durationMs: r.duration_ms,
+            serial: ''
+          }));
+        }
         this.detection = { detected: false };
       }
       this.detectLoading = false;
