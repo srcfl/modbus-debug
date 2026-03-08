@@ -178,19 +178,16 @@
             <span class="step" :class="{ done: detection && detection.detected, fail: detection && !detection.detected }">3</span>
             Detect Inverter
           </h2>
-          <p class="text-sm text-muted mb-2">Trying to identify your inverter by reading serial number registers...</p>
+          <p class="text-sm text-muted mb-2">Trying FC43 device identification and SunSpec discovery first, then serial register probing...</p>
 
           <!-- Detection progress -->
-          <div x-show="detectLoading || detectLog.length > 0" class="mt-4">
+          <div x-show="detectLoading || detectProgress" class="mt-4">
             <div class="scan-log">
-              <!-- Slave ID being tried -->
-              <div class="scan-log-entry" x-show="detectSlaveID !== null">
-                <span>Slave ID <strong x-text="detectSlaveID"></strong></span>
+              <div class="scan-log-entry">
+                <span x-text="detectProgress"></span>
                 <span x-show="detectLoading" class="flex items-center gap-2">
                   <span class="spinner"></span>
-                  <span class="text-muted text-sm" x-text="detectProgress"></span>
                 </span>
-                <span x-show="!detectLoading && !detection?.detected" class="badge badge-info">no match</span>
               </div>
             </div>
           </div>
@@ -494,8 +491,6 @@ function app() {
     // Detection
     detection: null,
     detectLoading: false,
-    detectLog: [],
-    detectSlaveID: null,
     detectProgress: '',
     profiles: [],
     selectedProfile: '',
@@ -639,69 +634,43 @@ function app() {
     async detectInverter() {
       this.detectLoading = true;
       this.detection = null;
-      this.detectLog = [];
-      this.detectSlaveID = null;
+      this.detectProgress = '';
 
-      const slaveIDs = [1, 0, 247];
+      // Phase 1+2+3: Call the full 3-phase detect endpoint (FC43 → SunSpec → serial)
+      // This tries slave IDs 1, 0, 247 automatically with a single TCP connection.
+      this.detectProgress = 'FC43 / SunSpec / serial probing (slave IDs 1, 0, 247)...';
 
-      // Adaptive timeout: if TCP was slow (e.g. WiFi dongle), use longer timeout
-      let timeoutMs = 500;
-      if (this.tcpResult && this.tcpResult.duration) {
-        const tcpMs = parseInt(this.tcpResult.duration);
-        if (tcpMs > 200) timeoutMs = Math.min(tcpMs * 5, 5000);
-        else if (tcpMs > 50) timeoutMs = 1000;
-      }
+      try {
+        const res = await fetch('/api/diagnose/detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            host: this.target.host,
+            port: this.target.port
+          })
+        });
+        const result = await res.json();
 
-      let found = false;
-
-      // Try slave IDs sequentially (many devices only allow 1 TCP connection)
-      for (const slaveID of slaveIDs) {
-        if (found) break;
-        this.detectSlaveID = slaveID;
-        this.detectProgress = 'Testing ' + this.profiles.length + ' profiles...';
-        this.detectLog = [{ slaveID }];
-
-        try {
-          const res = await fetch('/api/diagnose/detect-batch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              host: this.target.host,
-              port: this.target.port,
-              slave_id: slaveID,
-              timeout_ms: timeoutMs
-            })
-          });
-          const results = await res.json();
-
-          if (Array.isArray(results)) {
-            const match = results.find(r => r.detected);
-            const totalMs = results.reduce((sum, r) => sum + (r.duration_ms || 0), 0);
-
-            if (match) {
-              this.detectProgress = '';
-              this.detection = {
-                detected: true,
-                profile_name: match.profile,
-                display_name: match.display_name,
-                serial: match.serial,
-                slave_id: slaveID
-              };
-              this.selectedProfile = match.profile;
-              this.target.slaveID = slaveID;
-              found = true;
-            } else {
-              this.detectProgress = results.length + ' profiles tested in ' + totalMs + 'ms — no match';
-            }
-          }
-        } catch (e) {
-          this.detectProgress = 'Connection error';
+        if (result.detected) {
+          this.detectProgress = '';
+          this.detection = result;
+          this.selectedProfile = result.profile_name;
+          this.target.slaveID = result.slave_id;
+          this.detectLoading = false;
+          return;
         }
+
+        // Not detected — show any partial info (e.g. vendor from FC43/SunSpec without profile match)
+        if (result.vendor || result.model) {
+          this.detectProgress = 'Found device info (vendor: ' + (result.vendor || '?') + ', model: ' + (result.model || '?') + ') but no matching profile';
+        } else {
+          this.detectProgress = 'No match via FC43, SunSpec, or serial probing';
+        }
+      } catch (e) {
+        this.detectProgress = 'Connection error: ' + e.message;
       }
 
-      if (!found) {
-        this.detection = { detected: false };
-      }
+      this.detection = { detected: false };
       this.detectLoading = false;
     },
 

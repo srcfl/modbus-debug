@@ -73,6 +73,46 @@ func matchVendorToProfile(vendor string) (profileName string, found bool) {
 	return "", false
 }
 
+// portProfileHints maps well-known Modbus TCP ports to profiles likely found on that port.
+// Profiles listed here are tried first during Phase 3 serial probing.
+var portProfileHints = map[int][]string{
+	8899: {"deye", "solis", "sofar"},
+	6607: {"huawei"},
+}
+
+// profilesForPort returns all profiles reordered so port-hinted profiles come first.
+func profilesForPort(port int) []devices.Profile {
+	hints, ok := portProfileHints[port]
+	if !ok {
+		return devices.AllProfiles()
+	}
+
+	hintSet := make(map[string]bool, len(hints))
+	for _, h := range hints {
+		hintSet[h] = true
+	}
+
+	all := devices.AllProfiles()
+	reordered := make([]devices.Profile, 0, len(all))
+
+	// Add hinted profiles first (in hint order)
+	for _, name := range hints {
+		for _, p := range all {
+			if p.Name == name {
+				reordered = append(reordered, p)
+				break
+			}
+		}
+	}
+	// Add remaining profiles
+	for _, p := range all {
+		if !hintSet[p.Name] {
+			reordered = append(reordered, p)
+		}
+	}
+	return reordered
+}
+
 // TestTCP tests TCP connectivity to the given host:port.
 func TestTCP(host string, port int) TCPResult {
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -126,10 +166,11 @@ func DetectInverter(host string, port int) DetectionResult {
 		}
 	}
 
-	// Phase 3: Fall back to serial number register probing
+	// Phase 3: Fall back to serial number register probing (port-hinted order)
+	orderedProfiles := profilesForPort(port)
 	for _, slaveID := range slaveIDs {
 		client.SetSlaveID(slaveID)
-		for _, profile := range devices.AllProfiles() {
+		for _, profile := range orderedProfiles {
 			result := tryProfile(client, &profile, slaveID)
 			if result.Detected {
 				result.Method = "serial"
@@ -328,8 +369,8 @@ func detectWithSlaveID(host string, port int, slaveID byte) DetectionResult {
 		return result
 	}
 
-	// Phase 3: Serial number probing
-	for _, profile := range devices.AllProfiles() {
+	// Phase 3: Serial number probing (port-hinted order)
+	for _, profile := range profilesForPort(port) {
 		result := tryProfile(client, &profile, slaveID)
 		if result.Detected {
 			result.Method = "serial"
